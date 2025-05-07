@@ -1,28 +1,29 @@
 #include <glad/glad.h>
-
 #include <GLFW/glfw3.h>
 #include "lib/serialib.h"
 
-#if defined (_WIN32) || defined(_WIN64)
-
-#endif
 #if defined (__linux__) || defined(__APPLE__)
     #define SERIAL_PORT "/dev/cu.usbserial-120"
 #endif
+
 void serialfunc(serialib& serial);
-GLuint compileShader(GLenum type, const char* src) ;
+GLuint compileShader(GLenum type, const char* src);
 GLuint linkProgram(GLuint vert, GLuint frag);
 
-int  p0, p1, p2, p3, p4, p5;
+// Global parameters read via serial
+int p0, p1, p2, p3, p4, p5;
+
+// Fullscreen quad in NDC + UV coords
 float quadVertices[] = {
     -1.0f,  1.0f,   0.0f, 0.0f,
     -1.0f, -1.0f,   0.0f, 1.0f,
      1.0f, -1.0f,   1.0f, 1.0f,
-
     -1.0f,  1.0f,   0.0f, 0.0f,
      1.0f, -1.0f,   1.0f, 1.0f,
      1.0f,  1.0f,   1.0f, 0.0f
 };
+
+// Simple passthrough vertex shader
 const char* vertexShaderSource = R"vert(
     #version 330 core
     layout(location = 0) in vec2 aPos;
@@ -34,171 +35,190 @@ const char* vertexShaderSource = R"vert(
     }
 )vert";
 
-const char* effectFragmentShader = R"frag(
-#version 330 core
-in vec2 TexCoords;
-out vec4 FragColor;
-uniform vec2 resolution;
-uniform float time;
-uniform float xpos;
-uniform float ypos;
-uniform float uSize;
-void main() {
-    vec2 I = gl_FragCoord.xy;
-    vec4 O = vec4(0.0);
-    vec2 v = resolution;
-    vec2 p = (I * 2.0) / (v.y * uSize);
-    p.x -= xpos;
-    p.y -= ypos;
-    for(float i = 0.2, l; i < 1.0; i+=0.05)
-    {
-        v = vec2(mod(atan(p.y,p.x) + i + i*time, 6.2831853) - 3.1415926, 1.0) * length(p) - i;
-        v.x -= clamp(v.x += i, -i, i);
-        O += (cos(i * 5.0 + vec4(0,1,2,3)) + 1.0) *
-             (1.0 + v.y / (l = length(v) + 0.003)) / l;
-    }
-    O = tanh(O / 100.0);
-    FragColor = O;
-}
+const char* leftFragmentShader = R"frag(
+    #version 330 core
+    in vec2 TexCoords;
+    out vec4 FragColor;
+    void main() { FragColor = vec4(1.0, 0.0, 0.0, 1.0); }
 )frag";
+const char* centerFragmentShader = R"frag(
+    #version 330 core
+    in vec2 TexCoords;
+    out vec4 FragColor;
+    void main() { FragColor = vec4(0.0, 1.0, 0.0, 1.0); }
+)frag";
+const char* rightFragmentShader = R"frag(
+    #version 330 core
+    in vec2 TexCoords;
+    out vec4 FragColor;
+    void main() { FragColor = vec4(0.0, 0.0, 1.0, 1.0); }
+)frag";
+
+// Globals to track real framebuffer size
+static int fbW, fbH;
+
+// Callback for resized framebuffers
 
 
 int main() {
     serialib serial;
-    char errorOpening = serial.openDevice(SERIAL_PORT, 9600);
-    if (errorOpening!=1) return errorOpening;
-    printf ("Successful connection to %s\n",SERIAL_PORT);
-    if (!glfwInit());
+    bool serialDisponible = false;
+
+    // Attempt serial connection
+    char err = serial.openDevice(SERIAL_PORT, 9600);
+    if (err != 1) {
+        std::cerr << "Error opening serial: code " << (int)err << std::endl;
+        // handle or ignore; we won't crash if serial fails
+    } else {
+        std::cout << "Connected to " << SERIAL_PORT << std::endl;
+        serialDisponible = true;
+    }
+
+    if (!glfwInit()) return -1;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Sinestesia", NULL, NULL);
+    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+    GLFWwindow* window = glfwCreateWindow(
+        mode->width, mode->height,
+        "Sinestesia",
+        glfwGetPrimaryMonitor(),
+        NULL
+    );
     if (!window) {
         glfwTerminate();
         return -1;
     }
+
     glfwMakeContextCurrent(window);
+
+    // ---- FIX: Load GL functions *before* calling any GL commands ----
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        std::cerr << "Failed to initialize GLAD" << std::endl;
         glfwDestroyWindow(window);
         glfwTerminate();
         return -1;
     }
 
-    //dddd
+    // real size of framebuffer
+    glfwGetFramebufferSize(window, &fbW, &fbH);
+    glViewport(0, 0, fbW, fbH);
 
-
-    // Setup fullscreen quad
-    GLuint VAO,VBO;
-    glGenVertexArrays(1,&VAO);
-    glGenBuffers(1,&VBO);
+    // Setup fullscreen quad VAO/VBO
+    GLuint VAO, VBO;
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
     glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER,VBO);
-    glBufferData(GL_ARRAY_BUFFER,sizeof(quadVertices),quadVertices,GL_STATIC_DRAW);
-    glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(2*sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    GLuint v  = compileShader(GL_VERTEX_SHADER,   vertexShaderSource);
-    GLuint fe = compileShader(GL_FRAGMENT_SHADER, effectFragmentShader);
+    // Compile and link shaders
+    GLuint vShader   = compileShader(GL_VERTEX_SHADER,   vertexShaderSource);
+    GLuint fLeft     = compileShader(GL_FRAGMENT_SHADER, leftFragmentShader);
+    GLuint fCenter   = compileShader(GL_FRAGMENT_SHADER, centerFragmentShader);
+    GLuint fRight    = compileShader(GL_FRAGMENT_SHADER, rightFragmentShader);
 
-    GLuint effectProgram = linkProgram(v, fe);
+    GLuint progLeft   = linkProgram(vShader, fLeft);
+    GLuint progCenter = linkProgram(vShader, fCenter);
+    GLuint progRight  = linkProgram(vShader, fRight);
 
-    glDeleteShader(v);
-    glDeleteShader(fe);
+    glDeleteShader(vShader);
+    glDeleteShader(fLeft);
+    glDeleteShader(fCenter);
+    glDeleteShader(fRight);
 
-
-    // Uniform locations
-    GLint locResE  = glGetUniformLocation(effectProgram,"resolution");
-    GLint locTimeE = glGetUniformLocation(effectProgram,"time");
-    GLint locX     = glGetUniformLocation(effectProgram,"xpos");
-    GLint locY     = glGetUniformLocation(effectProgram,"ypos");
-    GLint locU     = glGetUniformLocation(effectProgram,"uSize");
-
-    glViewport(0, 0, 800, 600);
-    int esc = 0;
+    // Main loop
     while (!glfwWindowShouldClose(window)) {
-        bool input = false;
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            if (!input) {
-                esc+=1;
-                input = true;
-            }
-        }
-        if (esc>3) {
-            //closed window
-            glfwSetWindowShouldClose(window, GL_TRUE);
-        }
-        glUseProgram(effectProgram);
-        serialfunc(serial);
-        glClearColor((float)p3/1023.f ,(float)p4/1023.f, (float)p5/1023.f, (float)p2/1023.f);
+        if (serialDisponible) serialfunc(serial);
+
         glClear(GL_COLOR_BUFFER_BIT);
         glEnable(GL_BLEND);
-
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glUniform2f(locResE, 800.0f, 600.0f);
-        glUniform1f(locTimeE, (float)glfwGetTime());
-        glUniform1f(locX, (float)p0/300.f);
-        glUniform1f(locY, (float)p1/300.f);
-        glUniform1f(locU, 1.f);
         glBindVertexArray(VAO);
+
+        int third = fbW / 3;
+
+        // draw red on left third
+        glViewport(0,        0, third, fbH);
+        glUseProgram(progLeft);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
+        // draw green on center third
+        glViewport(third,    0, third, fbH);
+        glUseProgram(progCenter);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // draw blue on right third
+        glViewport(third*2,  0, third, fbH);
+        glUseProgram(progRight);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-        input = false;
     }
 
+    // Cleanup
+    glDeleteProgram(progLeft);
+    glDeleteProgram(progCenter);
+    glDeleteProgram(progRight);
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 0;
 }
 
+// Reads 6 16-bit values from serial, prints them
 void serialfunc(serialib& serial) {
-    unsigned char buffer[12];
-    int readBytes = serial.readBytes(buffer, 12, 1000);
-
-    if (readBytes == 12) {
-         p0 = buffer[0] | (buffer[1] << 8);
-         p1 = buffer[2] | (buffer[3] << 8);
-         p2 = buffer[4] | (buffer[5] << 8);
-         p3 = buffer[6] | (buffer[7] << 8);
-         p4 = buffer[8] | (buffer[9] << 8);
-         p5 = buffer[10] | (buffer[11] << 8);
-
-        std::cout << "P0: " << p0 << " | P1: " << p1 << " | P2: " << p2
-                  << " | P3: " << p3 << " | P4: " << p4 << " | P5: " << p5 << std::endl;
+    unsigned char buf[12];
+    int n = serial.readBytes(buf, 12, 1000);
+    if (n == 12) {
+        p0 = buf[0]  | (buf[1]  << 8);
+        p1 = buf[2]  | (buf[3]  << 8);
+        p2 = buf[4]  | (buf[5]  << 8);
+        p3 = buf[6]  | (buf[7]  << 8);
+        p4 = buf[8]  | (buf[9]  << 8);
+        p5 = buf[10] | (buf[11] << 8);
+        std::cout << "P0:" << p0 << " P1:" << p1 << " P2:" << p2
+                  << " P3:" << p3 << " P4:" << p4 << " P5:" << p5
+                  << std::endl;
     } else {
-        std::cerr << "Lectura incompleta: " << readBytes << " bytes." << std::endl;
+        std::cerr << "Serial read incomplete: " << n << " bytes\n";
     }
 }
 
+// Compile shader and log errors
 GLuint compileShader(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, NULL);
-    glCompileShader(shader);
-    GLint success;
-    char infoLog[512];
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if(!success) {
-        glGetShaderInfoLog(shader, 512, NULL, infoLog);
-        std::cerr << "Shader Compilation Error: " << infoLog << std::endl;
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, NULL);
+    glCompileShader(s);
+    GLint ok;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetShaderInfoLog(s, 512, NULL, log);
+        std::cerr << "Shader compile error: " << log << std::endl;
     }
-    return shader;
+    return s;
 }
 
-// Helper: link program and log errors
+// Link program and log errors
 GLuint linkProgram(GLuint vert, GLuint frag) {
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vert);
-    glAttachShader(prog, frag);
-    glLinkProgram(prog);
-    GLint success;
-    char log[512];
-    glGetProgramiv(prog, GL_LINK_STATUS, &success);
-    if(!success) {
-        glGetProgramInfoLog(prog, 512, NULL, log);
-        std::cerr << "Program Linking Error: " << log << std::endl;
+    GLuint p = glCreateProgram();
+    glAttachShader(p, vert);
+    glAttachShader(p, frag);
+    glLinkProgram(p);
+    GLint ok;
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetProgramInfoLog(p, 512, NULL, log);
+        std::cerr << "Program link error: " << log << std::endl;
     }
-    return prog;
+    return p;
 }
