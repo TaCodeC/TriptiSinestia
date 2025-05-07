@@ -53,7 +53,7 @@ int main() {
     const float BASE_NOISE     = 1.0f;
     const float MIN_NOISE      = -22.0f;
     const float MAX_NOISE      = 22.0f;
-    const float MAX_SWIRL      = 1023.0f;
+    const float MAX_SWIRL      = 200.0f;
     const float MAX_TIME_SCALE = 5.0f;
     const float MIN_TIME_SCALE = 0.1f;
 
