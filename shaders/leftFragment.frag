@@ -148,6 +148,12 @@ void main() {
 
     vec2 nom = TexCoords;
     vec2 p = nom - 0.5;
+    if (u_flowerDensity <= 0.1) {
+        vec2 fragLocal = TexCoords * u_resolution;
+        vec3 bg = backgroundNguyen(fragLocal);
+        FragColor = vec4(bg, 1.0);
+        return;
+    }
     p.x *= u_resolution.x / u_resolution.y;
     p.y += u_time * 0.1;
     p.x -= u_time * 0.03 + sin(u_time) * 0.1;
@@ -157,6 +163,7 @@ void main() {
 
     float blur = abs(nom.y -1.);
     blur = blur * blur * 2.0 * 0.15;
+    // Si la densidad es negativa, devolvemos solo el fondo
 
     vec3 col = backgroundNguyen(gl_FragCoord.xy);
 

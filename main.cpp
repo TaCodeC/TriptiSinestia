@@ -4,13 +4,14 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <iostream>
+#include <vector>
 
 #if defined (__linux__) || defined(__APPLE__)
-    #define SERIAL_PORT "/dev/cu.usbserial-120"
+    #define SERIAL_PORT "/dev/cu.usbserial-1120"
 #endif
 
 void serialfunc(serialib& serial);
-
 GLuint compileShader(GLenum type, const char* src);
 GLuint linkProgram(GLuint vert, GLuint frag);
 std::string loadShaderSource(const char* path);
@@ -18,17 +19,17 @@ std::string loadShaderSource(const char* path);
 // Global parameters read via serial
 int p0, p1, p2, p3, p4, p5;
 
-// Fullscreen quad in NDC + UV coords
-float quadVertices[] = {
-    -1.0f,  1.0f,   0.0f, 0.0f,
-    -1.0f, -1.0f,   0.0f, 1.0f,
-     1.0f, -1.0f,   1.0f, 1.0f,
-    -1.0f,  1.0f,   0.0f, 0.0f,
-     1.0f, -1.0f,   1.0f, 1.0f,
-     1.0f,  1.0f,   1.0f, 0.0f
+struct ProgramInfo {
+    GLuint program;
+    GLint loc_resolution;
+    GLint loc_time;
+    GLint loc_density;
+    GLint loc_noise;
+    GLint loc_swirl;
+    GLint loc_xOffset;
 };
 
-// Simple passthrough vertex shader
+// Vertex shader source
 const char* vertexShaderSource = R"vert(
     #version 330 core
     layout(location = 0) in vec2 aPos;
@@ -40,27 +41,29 @@ const char* vertexShaderSource = R"vert(
     }
 )vert";
 
-
-
-
-// Globals to track real framebuffer size
 static int fbW, fbH;
-
-// Callback for resized framebuffers
-
 
 int main() {
     serialib serial;
     bool serialDisponible = false;
 
+    // Constants for emotion mapping
+    const float BASE_DENSITY   = 0.1f;
+    const float MAX_DENSITY    = 20.0f;
+    const float BASE_NOISE     = 1.0f;
+    const float MIN_NOISE      = -22.0f;
+    const float MAX_NOISE      = 22.0f;
+    const float MAX_SWIRL      = 1023.0f;
+    const float MAX_TIME_SCALE = 5.0f;
+    const float MIN_TIME_SCALE = 0.1f;
+
     // Attempt serial connection
-    char err = serial.openDevice(SERIAL_PORT, 9600);
-    if (err != 1) {
-        std::cerr << "Error opening serial: code " << (int)err << std::endl;
-        // handle or ignore; we won't crash if serial fails
-    } else {
+    char err = serial.openDevice(SERIAL_PORT, 115200);
+    if (err == 1) {
         std::cout << "Connected to " << SERIAL_PORT << std::endl;
         serialDisponible = true;
+    } else {
+        std::cerr << "Error opening serial: code " << (int)err << std::endl;
     }
 
     if (!glfwInit()) return -1;
@@ -69,17 +72,8 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-    GLFWwindow* window = glfwCreateWindow(
-        mode->width, mode->height,
-        "Sinestesia",
-        glfwGetPrimaryMonitor(),
-        NULL
-    );
-    if (!window) {
-        glfwTerminate();
-        return -1;
-    }
-
+    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, "Sinestesia", glfwGetPrimaryMonitor(), NULL);
+    if (!window) { glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -89,11 +83,18 @@ int main() {
         return -1;
     }
 
-    // real size of framebuffer
     glfwGetFramebufferSize(window, &fbW, &fbH);
     glViewport(0, 0, fbW, fbH);
 
-    // Setup fullscreen quad VAO/VBO
+    // Quad setup
+    float quadVertices[] = {
+        -1.0f,  1.0f, 0.0f, 0.0f,
+        -1.0f, -1.0f, 0.0f, 1.0f,
+         1.0f, -1.0f, 1.0f, 1.0f,
+        -1.0f,  1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 1.0f, 1.0f,
+         1.0f,  1.0f, 1.0f, 0.0f
+    };
     GLuint VAO, VBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -105,66 +106,104 @@ int main() {
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // Compile and link shaders
-    GLuint vShader   = compileShader(GL_VERTEX_SHADER,   vertexShaderSource);
-    GLuint fLeft     = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/leftFragment.frag").c_str());
-    GLuint fCenter   = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/centerFragment.frag").c_str());
-    GLuint fRight    = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/rightFragment.frag").c_str());
+    // Compile shaders
+    GLuint vShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
+    std::vector<std::string> fragPaths = {"../shaders/leftFragment.frag", "../shaders/centerFragment.frag", "../shaders/rightFragment.frag"};
+    std::vector<ProgramInfo> programs;
+    programs.reserve(3);
 
-    GLuint progLeft   = linkProgram(vShader, fLeft);
-    GLuint progCenter = linkProgram(vShader, fCenter);
-    GLuint progRight  = linkProgram(vShader, fRight);
-    // Ejemplo en C++ con OpenGL
-    glUniform2f(glGetUniformLocation(progLeft, "u_resolution"), fbW, fbH);
-    glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime());
+    for (int i = 0; i < 3; ++i) {
+        std::string src = loadShaderSource(fragPaths[i].c_str());
+        GLuint fShader = compileShader(GL_FRAGMENT_SHADER, src.c_str());
+        GLuint prog = linkProgram(vShader, fShader);
+        glDeleteShader(fShader);
 
+        ProgramInfo info;
+        info.program        = prog;
+        info.loc_resolution = glGetUniformLocation(prog, "u_resolution");
+        info.loc_time       = glGetUniformLocation(prog, "u_time");
+        info.loc_density    = glGetUniformLocation(prog, "u_flowerDensity");
+        info.loc_noise      = glGetUniformLocation(prog, "u_noiseAmount");
+        info.loc_swirl      = glGetUniformLocation(prog, "u_swirlIntensity");
+        info.loc_xOffset    = glGetUniformLocation(prog, "u_xOffset");
+        programs.push_back(info);
+    }
     glDeleteShader(vShader);
-    glDeleteShader(fLeft);
-    glDeleteShader(fCenter);
-    glDeleteShader(fRight);
-    glEnable(GL_BLEND);
-    // Main loop
+
+    // Helper clamp
+    auto clamp = [](float v, float lo, float hi) {
+        return (v < lo ? lo : (v > hi ? hi : v));
+    };
+
+    // Render loop
     while (!glfwWindowShouldClose(window)) {
         if (serialDisponible) serialfunc(serial);
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        float densityArr[3], noiseArr[3], swirlArr[3], timeScaleArr[3];
+        for (int i = 0; i < 3; ++i) {
+            int rawLeft  = (i==0 ? p0 : i==1 ? p2 : p4);
+            int rawRight = (i==0 ? p1 : i==1 ? p3 : p5);
+            float leftN  = rawLeft  / 1023.0f;
+            float rightN = rawRight / 1023.0f;
+
+            // Default time scale
+            timeScaleArr[i] = 1.0f;
+
+            if (rightN > 0.0f && leftN <= 0.0f) {
+                // Felicidad sola: acelerar tiempo hasta 1.8x
+                densityArr[i]    = clamp(BASE_DENSITY + rightN * (MAX_DENSITY - BASE_DENSITY), BASE_DENSITY, MAX_DENSITY);
+                noiseArr[i]      = BASE_NOISE;
+                swirlArr[i]      = 0.0f;
+                timeScaleArr[i] = clamp(1.0f + rightN * (MAX_TIME_SCALE - 1.0f), 1.0f, MAX_TIME_SCALE);
+
+            } else if (leftN > 0.0f && rightN <= 0.0f) {
+                // Melancolía sola: ralentizar tiempo
+                densityArr[i]    = BASE_DENSITY;
+                noiseArr[i]      = clamp(BASE_NOISE + leftN * (MIN_NOISE - BASE_NOISE), MIN_NOISE, MAX_NOISE);
+                swirlArr[i]      = leftN * MAX_SWIRL;
+                timeScaleArr[i] = clamp(1.0f - leftN, MIN_TIME_SCALE, 1.0f);
+
+            } else if (leftN > 0.0f && rightN > 0.0f) {
+                // Combinación: mix velocidad y lentitud
+                float comb = (leftN + rightN) * 0.5f;
+                densityArr[i]    = clamp(BASE_DENSITY - comb * BASE_DENSITY, BASE_DENSITY, MAX_DENSITY);
+                noiseArr[i]      = clamp(BASE_NOISE + comb * (MAX_NOISE - BASE_NOISE), MIN_NOISE, MAX_NOISE);
+                swirlArr[i]      = comb * MAX_SWIRL;
+                timeScaleArr[i] = clamp((1.0f - leftN) + rightN * (MAX_TIME_SCALE - 1.0f), MIN_TIME_SCALE, MAX_TIME_SCALE);
+
+            } else {
+                // Ninguno
+                densityArr[i]    = BASE_DENSITY;
+                noiseArr[i]      = BASE_NOISE;
+                swirlArr[i]      = 0.0f;
+                timeScaleArr[i]  = 1.0f;
+            }
+        }
+
         glBindVertexArray(VAO);
-
         int third = fbW / 3;
-
-
-        // draw red on left third
-        glViewport(0,        0, third, fbH);
-        glUseProgram(progLeft);
-        //set uniforms
-        glUniform2f(glGetUniformLocation(progLeft, "u_resolution"), fbW/3, fbH);
-        glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime()*0.2);
-        glUniform1f(glGetUniformLocation(progLeft, "u_flowerDensity"),  .5f);
-        glUniform1f(glGetUniformLocation(progLeft, "u_noiseAmount"), 1.f);
-        glUniform1f(glGetUniformLocation(progLeft, "u_swirlIntensity"), 800.f);
-
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        // draw green on center third
-        glViewport(third,    0, third, fbH);
-        glUseProgram(progCenter);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        // draw blue on right third
-        glViewport(third*2,  0, third, fbH);
-        glUseProgram(progRight);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        for (int i = 0; i < 3; ++i) {
+            const auto &info = programs[i];
+            int x = i * third;
+            glViewport(x, 0, third, fbH);
+            glUseProgram(info.program);
+            glUniform2f(info.loc_resolution, (float)third, (float)fbH);
+            glUniform1f(info.loc_time,       (float)glfwGetTime() * timeScaleArr[i]);
+            glUniform1f(info.loc_density,    densityArr[i]);
+            glUniform1f(info.loc_noise,      noiseArr[i]);
+            glUniform1f(info.loc_swirl,      swirlArr[i]);
+            if (info.loc_xOffset != -1)
+                glUniform1f(info.loc_xOffset, (float)x);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    // Cleanup
-    glDeleteProgram(progLeft);
-    glDeleteProgram(progCenter);
-    glDeleteProgram(progRight);
+    serial.closeDevice();
+    for (const auto &info : programs)
+        glDeleteProgram(info.program);
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glfwDestroyWindow(window);
@@ -191,7 +230,6 @@ void serialfunc(serialib& serial) {
     }
 }
 
-// Compile shader and log errors
 GLuint compileShader(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, NULL);
@@ -206,7 +244,6 @@ GLuint compileShader(GLenum type, const char* src) {
     return s;
 }
 
-// Link program and log errors
 GLuint linkProgram(GLuint vert, GLuint frag) {
     GLuint p = glCreateProgram();
     glAttachShader(p, vert);
@@ -221,7 +258,7 @@ GLuint linkProgram(GLuint vert, GLuint frag) {
     }
     return p;
 }
-// loader {
+
 std::string loadShaderSource(const char* path) {
     std::ifstream file(path);
     if (!file.is_open()) {
