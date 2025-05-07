@@ -140,9 +140,10 @@ int main() {
         glUseProgram(progLeft);
         //set uniforms
         glUniform2f(glGetUniformLocation(progLeft, "u_resolution"), fbW/3, fbH);
-        glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime());
-        glUniform1f(glGetUniformLocation(progLeft, "u_flowerDensity"), 5.f);
+        glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime()*0.2);
+        glUniform1f(glGetUniformLocation(progLeft, "u_flowerDensity"),  .5f);
         glUniform1f(glGetUniformLocation(progLeft, "u_noiseAmount"), 1.f);
+        glUniform1f(glGetUniformLocation(progLeft, "u_swirlIntensity"), 800.f);
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
 

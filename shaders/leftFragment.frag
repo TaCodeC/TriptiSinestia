@@ -4,6 +4,7 @@ uniform vec2 u_resolution;
 uniform float u_time;
 uniform float u_flowerDensity;
 uniform float u_noiseAmount;
+uniform float u_swirlIntensity;
 
 in vec2 TexCoords;
 out vec4 FragColor;
@@ -16,52 +17,84 @@ vec4 N14(float t) {
     return fract(sin(t * vec4(123.0, 104.0, 145.0, 24.0)) * vec4(657.0, 345.0, 879.0, 154.0));
 }
 
-const float baseFlowerScale = 0.6;
+const float baseFlowerScale = 8.0;
 
 // Signed distance of sakura petal shape
 vec4 sakura(vec2 uv, vec2 id, float blur) {
-    float time = u_time + 45.0;
-    vec4 rnd = N14(mod(id.x,500.0)*5.4 + mod(id.y,500.0)*13.67);
+    vec4 rnd  = N14(mod(id.x,500.0)*5.4 + mod(id.y,500.0)*13.67);
 
-    // Escala: fija * variación * densidad
-    uv *= mix(0.75, 1.3, rnd.y) * baseFlowerScale * u_flowerDensity;
-    uv.x += sin(time * rnd.z * 0.3) * 0.6;
-    uv.y += sin(time * rnd.w * 0.45) * 0.4;
+    // ——— escala con variación extra ———
+    float extraScale = mix(0.8, 1.2, rnd.y);
+    uv *= mix(0.75, 1.3, rnd.y) * extraScale
+    * baseFlowerScale * pow(u_flowerDensity, -0.5);
 
-    float angle = atan(uv.y, uv.x) + rnd.x * 421.47 + u_time * mix(-0.6,0.6,rnd.x);
-    float dist = length(uv);
-    float petal = 1.0 - abs(sin(angle * 2.5));
-    float sq = petal * petal;
-    petal = mix(petal, sq, 0.7);
+    // ——— movimiento más aleatorio ———
+    float speedFactor = mix(0.2, 1.5, rnd.z);
+    float dirAngle    = rnd.w * 6.2831853; // 2π
+    float t = (u_time + 45.0) * speedFactor;
+    float amp = mix(0.3, 1.0, rnd.w);
+
+    uv += vec2(
+    cos(dirAngle) * sin(t + rnd.x * 3.14),
+    sin(dirAngle) * cos(t + rnd.y * 1.73)
+    ) * amp;
+
+    // ——— swirl también aleatorio ———
+    float swirlSpeed = mix(-1.5, 1.5, rnd.w);
+    float swirl      = u_time * swirlSpeed;
+
+    // resto del cálculo…
+    float angle = atan(uv.y, uv.x) + rnd.x * 421.47 + swirl;
+    float dist  = length(uv);
+
+    // forma
+    float petal  = 1.0 - abs(sin(angle * 2.5));
+    float sq     = petal*petal;
+    petal        = mix(petal, sq, 0.7);
     float petal2 = 1.0 - abs(sin(angle * 2.5 + 1.5));
-    petal += petal2 * 0.2;
+    petal       += petal2 * 0.2;
     float sakuraDist = dist + petal * 0.25;
-    float shadow = S(0.5 + 0.3, 0.5 - 0.3, sakuraDist) * 0.4;
-    float sakuraMask = S(0.5 + blur, 0.5 - blur, sakuraDist);
 
-    vec3 col = vec3(1.0,0.6,0.7) + (0.5 - dist) * 0.2;
-    float outlineMask = S(0.5 - blur, 0.5, sakuraDist + 0.045);
-    float polar = angle * 1.9098 + 0.5;
-    float pist = fract(polar) - 0.5;
-    float petBlur = blur * 2.0;
-    float barW = 0.2 - dist * 0.7;
-    float pistilBar = S(-barW, -barW + petBlur, pist) * S(barW + petBlur, barW, pist);
-    float pistilMask = S(0.12 + blur, 0.12, dist) * S(0.05, 0.05 + blur, dist);
-    float pistilDot = S(0.1 + petBlur, 0.1 - petBlur, length(vec2(pist * 0.10, dist) - vec2(0,0.16)) * 9.0);
+    // sombras y máscara
+    float shadow     = S(0.8, 0.2, sakuraDist) * 0.4;
+    float sakuraMask = S(0.5+blur, 0.5-blur, sakuraDist);
+
+    // color atenuado
+    vec3 petalCol = mix(vec3(1.0,0.6,0.7), vec3(0.7), 0.3)
+    + (0.5 - dist) * 0.2;
+
+    // contorno y pistilos
+    float outlineMask = S(0.5-blur, 0.5, sakuraDist + 0.045);
+    float polar       = angle * 1.9098 + 0.5;
+    float pist        = fract(polar) - 0.5;
+    float petBlur     = blur * 2.0;
+    float barW        = 0.2 - dist * 0.7;
+    float pistilBar   = S(-barW, -barW+petBlur, pist)
+    * S(barW+petBlur, barW, pist);
+    float pistilMask  = S(0.12+blur, 0.12, dist)
+    * S(0.05, 0.05+blur, dist);
+    float pistilDot   = S(0.1+petBlur, 0.1-petBlur,
+    length(vec2(pist*0.1,dist)
+    - vec2(0,0.16))*9.0);
 
     outlineMask += pistilMask * pistilBar + pistilDot;
-    col = mix(col, vec3(1.0,0.3,0.3), sat(outlineMask) * 0.5);
-    col = mix(vec3(0.2,0.2,0.8) * shadow, col, sakuraMask);
+
+    // mezcla
+    vec3 c = mix(petalCol, vec3(1.0,0.3,0.3), sat(outlineMask)*0.5);
+    c = mix(vec3(0.2,0.2,0.8)*shadow, c, sakuraMask);
+
     sakuraMask = sat(sakuraMask + shadow);
-    return vec4(col * sakuraMask, sakuraMask/u_time);
+    return vec4(c * sakuraMask, sakuraMask);
 }
 
-// Alpha blending
+// blending con alpha premultiplicado
 vec4 blend(vec4 src, vec4 dst) {
-    vec3 rgb = dst.rgb * (1.0 - src.a) + src.rgb;
-    float a = 1.0 - (1.0 - src.a) * (1.0 - dst.a);
+    vec3 rgb = dst.rgb * (1.0 - src.a)
+    + src.rgb * src.a;
+    float a = src.a + dst.a * (1.0 - src.a);
     return vec4(rgb, a);
 }
+
 
 // Crea una capa de flores repetidas
 vec4 layer(vec2 uv, float blur) {
@@ -81,22 +114,33 @@ vec4 layer(vec2 uv, float blur) {
 // Fondo Nguyen2007 con control de ruido
 vec3 backgroundNguyen(vec2 fragCoord) {
     vec2 v = u_resolution;
-    vec2 u = 0.2 * (fragCoord + fragCoord - v) / v.y;
+    vec2 u =  0.2 * (fragCoord * 2.0 - v) / v.y;
 
     vec4 z = vec4(1,2,3,0), o = vec4(0);
-    float a = 0.5, t = u_time;
+    float a = 0.01, t = u_time;
     for(float i = 0.0; i < 19.0; i++) {
-        o += (1.0 + cos(z + t))
+        o += (.90 + cos(z + t))
         / length((1.0 + i * dot(v, v)) * sin(1.5 * u / (0.5 - dot(u,u)) - 9.0 * u.yx + t));
-        v = cos(++t - 7.0 * u * pow(a += 0.03, i)) - 5.0 * u;
-    u += tanh(40.0 * dot(u *= mat2(cos(i + 0.02 * t - vec4(0,11,33,0))), u)
+        v = cos(++t - 7.0 * u * pow(a += .03, i)) - 5.0 * u;
+    u += tanh(u_swirlIntensity  * dot(u *= mat2(cos(i + 0.02 /* <- Recordar agregar alteracion por uniform*/* t - vec4(0,11,33,0))), u)
     * cos(100.0 * u.yx + t))/200.0
     + 0.2 * a * u
-    + cos(4.0 / exp(dot(o,o) / 100.0) + t)/300.0;
+    + cos(1.0 / exp(dot(o,o) / 100.0) + t)/300.0;
     }
-    vec3 noiseCol = vec3(25.6) / (min(o.rgb,13.0) + 164.0 / o.rgb) - dot(u,u) / 250.0;
+    vec3 noiseCol = vec3(25.6) / (min(o.rgb,13.0) + 164.0 / o.rgb) - dot(u,u) /200;
     vec3 baseColor = mix(vec3(0.3,0.3,1.0), vec3(1.0), fragCoord.y / u_resolution.y);
-    return mix(baseColor, noiseCol, u_noiseAmount);
+    // --- Nueva sección: máscara de bordes ---
+    // distancia normalizada al centro [0 = centro, 1 = esquina]
+    float distToCenter = length((fragCoord - 0.5 * v) / v);
+    // ramp-up suave del ruido entre 0.6 y 0.9 de distToCenter
+    float edgeMask = smoothstep(0.2, 20., distToCenter);
+
+    // mezclamos
+    return mix(
+        baseColor,
+        noiseCol,
+        u_noiseAmount * edgeMask
+    );
 }
 
 void main() {
@@ -111,7 +155,7 @@ void main() {
     // Regula cantidad: más densidad = más flores
     p *= u_flowerDensity;
 
-    float blur = abs(nom.y - 0.5);
+    float blur = abs(nom.y -1.);
     blur = blur * blur * 2.0 * 0.15;
 
     vec3 col = backgroundNguyen(gl_FragCoord.xy);
