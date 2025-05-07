@@ -114,12 +114,15 @@ int main() {
     GLuint progLeft   = linkProgram(vShader, fLeft);
     GLuint progCenter = linkProgram(vShader, fCenter);
     GLuint progRight  = linkProgram(vShader, fRight);
+    // Ejemplo en C++ con OpenGL
+    glUniform2f(glGetUniformLocation(progLeft, "u_resolution"), fbW, fbH);
+    glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime());
 
     glDeleteShader(vShader);
     glDeleteShader(fLeft);
     glDeleteShader(fCenter);
     glDeleteShader(fRight);
-
+    glEnable(GL_BLEND);
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         if (serialDisponible) serialfunc(serial);
@@ -131,9 +134,16 @@ int main() {
 
         int third = fbW / 3;
 
+
         // draw red on left third
         glViewport(0,        0, third, fbH);
         glUseProgram(progLeft);
+        //set uniforms
+        glUniform2f(glGetUniformLocation(progLeft, "u_resolution"), fbW/3, fbH);
+        glUniform1f(glGetUniformLocation(progLeft, "u_time"), glfwGetTime());
+        glUniform1f(glGetUniformLocation(progLeft, "u_flowerDensity"), 5.f);
+        glUniform1f(glGetUniformLocation(progLeft, "u_noiseAmount"), 1.f);
+
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         // draw green on center third
