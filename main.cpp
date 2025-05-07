@@ -1,14 +1,19 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "lib/serialib.h"
+#include <fstream>
+#include <sstream>
+#include <string>
 
 #if defined (__linux__) || defined(__APPLE__)
     #define SERIAL_PORT "/dev/cu.usbserial-120"
 #endif
 
 void serialfunc(serialib& serial);
+
 GLuint compileShader(GLenum type, const char* src);
 GLuint linkProgram(GLuint vert, GLuint frag);
+std::string loadShaderSource(const char* path);
 
 // Global parameters read via serial
 int p0, p1, p2, p3, p4, p5;
@@ -35,24 +40,8 @@ const char* vertexShaderSource = R"vert(
     }
 )vert";
 
-const char* leftFragmentShader = R"frag(
-    #version 330 core
-    in vec2 TexCoords;
-    out vec4 FragColor;
-    void main() { FragColor = vec4(1.0, 0.0, 0.0, 1.0); }
-)frag";
-const char* centerFragmentShader = R"frag(
-    #version 330 core
-    in vec2 TexCoords;
-    out vec4 FragColor;
-    void main() { FragColor = vec4(0.0, 1.0, 0.0, 1.0); }
-)frag";
-const char* rightFragmentShader = R"frag(
-    #version 330 core
-    in vec2 TexCoords;
-    out vec4 FragColor;
-    void main() { FragColor = vec4(0.0, 0.0, 1.0, 1.0); }
-)frag";
+
+
 
 // Globals to track real framebuffer size
 static int fbW, fbH;
@@ -119,9 +108,9 @@ int main() {
 
     // Compile and link shaders
     GLuint vShader   = compileShader(GL_VERTEX_SHADER,   vertexShaderSource);
-    GLuint fLeft     = compileShader(GL_FRAGMENT_SHADER, leftFragmentShader);
-    GLuint fCenter   = compileShader(GL_FRAGMENT_SHADER, centerFragmentShader);
-    GLuint fRight    = compileShader(GL_FRAGMENT_SHADER, rightFragmentShader);
+    GLuint fLeft     = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/leftFragment.frag").c_str());
+    GLuint fCenter   = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/centerFragment.frag").c_str());
+    GLuint fRight    = compileShader(GL_FRAGMENT_SHADER, loadShaderSource("../shaders/rightFragment.frag").c_str());
 
     GLuint progLeft   = linkProgram(vShader, fLeft);
     GLuint progCenter = linkProgram(vShader, fCenter);
@@ -221,4 +210,15 @@ GLuint linkProgram(GLuint vert, GLuint frag) {
         std::cerr << "Program link error: " << log << std::endl;
     }
     return p;
+}
+// loader {
+std::string loadShaderSource(const char* path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "No se pudo abrir el archivo: " << path << std::endl;
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
 }
