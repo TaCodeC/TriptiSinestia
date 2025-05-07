@@ -82,7 +82,6 @@ int main() {
 
     glfwMakeContextCurrent(window);
 
-    // ---- FIX: Load GL functions *before* calling any GL commands ----
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "Failed to initialize GLAD" << std::endl;
         glfwDestroyWindow(window);
