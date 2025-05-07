@@ -3,7 +3,6 @@
 > A real-time audiovisual visualization experiment using OpenGL and serial input.  
 > The screen is divided into three segments, each reacting dynamically with its own shader.
 
-![Tripti Banner](https://yourdomain.com/banner.png) <!-- Optional image -->
 
 ---
 
