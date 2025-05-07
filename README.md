@@ -1,20 +1,25 @@
 # 🎨 Tripti - Sinestesia
 
-> Un experimento de visualización audiovisual en tiempo real con OpenGL y entrada serial.  
-> Cada tercio de la pantalla representa un fragmento distinto, reaccionando dinámicamente a datos recibidos por puerto serial.
-> 
----
+> A real-time audiovisual visualization experiment using OpenGL and serial input.  
+> The screen is divided into three segments, each reacting dynamically with its own shader.
 
-## 🧠 Concepto
-
-**Tripti - Sinestesia** es una instalación digital que fusiona estímulos visuales y datos físicos en tres zonas: izquierda, centro y derecha. Cada zona es controlada por un shader distinto, creando una sinestesia visual que responde a señales provenientes de un dispositivo serial (por ejemplo, un microcontrolador como Arduino).
+![Tripti Banner](https://yourdomain.com/banner.png) <!-- Optional image -->
 
 ---
 
- ## 🔧 Requisitos
+## 🧠 Concept
 
-- C++
+**Tripti - Sinestesia** is a digital installation that merges visual stimuli with physical data in three distinct zones: left, center, and right. Each area is driven by a separate GLSL shader, responding to live input from a serial device (e.g., Arduino), creating a visual form of *synesthesia*.
+
+---
+
+## 🔧 Requirements
+
+- C++17
 - [GLFW](https://www.glfw.org/)
 - [GLAD](https://glad.dav1d.de/)
-- OpenGL 3.3
+- OpenGL 3.3 Core
 - [serialib](https://github.com/imabot2/serialib)
+
+---
+
